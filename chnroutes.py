@@ -1,150 +1,183 @@
 #!/usr/bin/env python
 
-import re
-import urllib2
-import sys
 import argparse
 import math
-import textwrap
+import os
+import re
+import subprocess
+import sys
+import urllib2
 
+output_dir = None
 
 def generate_ovpn(metric):
-    results = fetch_ip_data()  
-    rfile=open('routes.txt','w')
-    for ip,mask,_ in results:
-        route_item="route %s %s net_gateway %d\n"%(ip,mask,metric)
-        rfile.write(route_item)
-    rfile.close()
-    print "Usage: Append the content of the newly created routes.txt to your openvpn config file," \
-          " and also add 'max-routes %d', which takes a line, to the head of the file." % (len(results)+20)
+    results = fetch_ip_data()
 
+    upscript_header = """\
+#!/bin/bash -
+
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+OLDGW=$(ip route show 0/0 | head -n1 | grep 'via' | grep -Po '\d+\.\d+\.\d+\.\d+')
+
+ip -batch - <<EOF
+"""
+    downscript_header = """\
+#!/bin/bash -
+
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+ip -batch - <<EOF
+"""
+
+    upfile = open(os.path.join(output_dir, 'vpn-up.sh'), 'w')
+    downfile = open(os.path.join(output_dir, 'vpn-down.sh'), 'w')
+
+    upfile.write(upscript_header)
+    downfile.write(downscript_header)
+
+    for ip, _, mask in results:
+        upfile.write('route add %s/%s via $OLDGW metric %s\n' % (ip, mask, metric))
+        downfile.write('route del %s/%s\n' % (ip, mask))
+
+    upfile.write('EOF\n')
+    downfile.write('EOF\n')
+
+    upfile.close()
+    downfile.close()
+
+    os.chmod(os.path.join(output_dir, 'vpn-up.sh'), 00755)
+    os.chmod(os.path.join(output_dir, 'vpn-down.sh'), 00755)
+
+def generate_old(metric):
+    results = fetch_ip_data()
+
+    rfile = open(os.path.join(output_dir, 'routes.txt'),'w')
+
+    rfile.write('max-routes %d\n\n' % (len(results) + 20))
+
+    for ip, mask, _ in results:
+        rfile.write("route %s %s net_gateway %d\n" % (ip, mask, metric))
+
+    rfile.close()
 
 def generate_linux(metric):
     results = fetch_ip_data()
-    upscript_header=textwrap.dedent("""\
-    #!/bin/bash
-    export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
-    
-    OLDGW=`ip route show | grep '^default' | sed -e 's/default via \\([^ ]*\\).*/\\1/'`
-    
-    if [ $OLDGW == '' ]; then
-        exit 0
-    fi
-    
-    if [ ! -e /tmp/vpn_oldgw ]; then
-        echo $OLDGW > /tmp/vpn_oldgw
-    fi
-    
-    """)
-    
-    downscript_header=textwrap.dedent("""\
-    #!/bin/bash
-    export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
-    
-    OLDGW=`cat /tmp/vpn_oldgw`
-    
-    """)
-    
-    upfile=open('ip-pre-up','w')
-    downfile=open('ip-down','w')
-    
+
+    upscript_header = """\
+#!/bin/bash -
+
+OLDGW=$(ip route show 0/0 | head -n1 | grep 'via' | grep -Po '\d+\.\d+\.\d+\.\d+')
+
+if [ $OLDGW == '' ]; then
+    exit 0
+fi
+
+if [ ! -e /tmp/vpn_oldgw ]; then
+    echo $OLDGW > /tmp/vpn_oldgw
+fi
+
+ip -batch - <<EOF
+"""
+
+    downscript_header = """\
+#!/bin/bash
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+
+OLDGW=$(cat /tmp/vpn_oldgw)
+
+ip -batch - <<EOF
+"""
+
+    upfile = open(os.path.join(output_dir, 'ip-pre-up'), 'w')
+    downfile = open(os.path.join(output_dir, 'ip-down'), 'w')
+
     upfile.write(upscript_header)
-    upfile.write('\n')
     downfile.write(downscript_header)
-    downfile.write('\n')
-    
-    for ip,mask,_ in results:
-        upfile.write('route add -net %s netmask %s gw $OLDGW\n'%(ip,mask))
-        downfile.write('route del -net %s netmask %s\n'%(ip,mask))
 
-    downfile.write('rm /tmp/vpn_oldgw\n')
+    for ip, _, mask in results:
+        upfile.write('route add %s/%s via $OLDGW metric %s\n' % (ip, mask, metric))
+        downfile.write('route del %s/%s\n' % (ip, mask))
 
+    upfile.write('EOF\n')
+    downfile.write('''\
+EOF
 
-    print "For pptp only, please copy the file ip-pre-up to the folder/etc/ppp," \
-          "and copy the file ip-down to the folder /etc/ppp/ip-down.d."
+rm /tmp/vpn_oldgw
+''')
+
+    upfile.close()
+    downfile.close()
+
+    os.chmod(os.path.join(output_dir, 'ip-pre-up'), 00755)
+    os.chmod(os.path.join(output_dir, 'ip-down'), 00755)
 
 def generate_mac(metric):
     results=fetch_ip_data()
-    
-    upscript_header=textwrap.dedent("""\
-    #!/bin/sh
-    export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
-    
-    OLDGW=`netstat -nr | grep '^default' | grep -v 'ppp' | sed 's/default *\\([0-9\.]*\\) .*/\\1/'`
 
-    if [ ! -e /tmp/pptp_oldgw ]; then
-        echo "${OLDGW}" > /tmp/pptp_oldgw
-    fi
-    
-    dscacheutil -flushcache
-    
-    """)
-    
-    downscript_header=textwrap.dedent("""\
-    #!/bin/sh
-    export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
-    
-    if [ ! -e /tmp/pptp_oldgw ]; then
-            exit 0
-    fi
-    
-    ODLGW=`cat /tmp/pptp_oldgw`
-    
-    """)
-    
-    upfile=open('ip-up','w')
-    downfile=open('ip-down','w')
-    
+    upscript_header = """\
+#!/bin/sh
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+
+OLDGW=`netstat -nr | grep '^default' | grep -v 'ppp' | sed 's/default *\\([0-9\.]*\\) .*/\\1/'`
+
+if [ ! -e /tmp/pptp_oldgw ]; then
+    echo "${OLDGW}" > /tmp/pptp_oldgw
+fi
+
+dscacheutil -flushcache
+"""
+
+    downscript_header = """\
+#!/bin/sh
+export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
+
+if [ ! -e /tmp/pptp_oldgw ]; then
+        exit 0
+fi
+
+OLDGW=`cat /tmp/pptp_oldgw`
+"""
+
+    upfile = open(os.path.join(output_dir, 'ip-up'),'w')
+    downfile = open(os.path.join(output_dir, 'ip-down'),'w')
+
     upfile.write(upscript_header)
-    upfile.write('\n')
     downfile.write(downscript_header)
-    downfile.write('\n')
-    
-    for ip,_,mask in results:
-        upfile.write('route add %s/%s "${OLDGW}"\n'%(ip,mask))
-        downfile.write('route delete %s/%s ${OLDGW}\n'%(ip,mask))
-    
+
+    for ip, _, mask in results:
+        upfile.write('route add %s/%s "${OLDGW}"\n' % (ip, mask))
+        downfile.write('route delete %s/%s ${OLDGW}\n' % (ip, mask))
+
     downfile.write('\n\nrm /tmp/pptp_oldgw\n')
+
     upfile.close()
     downfile.close()
-    
-    print "For pptp on mac only, please copy ip-up and ip-down to the /etc/ppp folder," \
-          "don't forget to make them executable with the chmod command."
+
+    os.chmod(os.path.join(output_dir, 'ip-up'), 00755)
+    os.chmod(os.path.join(output_dir, 'ip-down'), 00755)
 
 def generate_win(metric):
-    results = fetch_ip_data()  
+    results = fetch_ip_data()
 
-    upscript_header=textwrap.dedent("""@echo off
-    for /F "tokens=3" %%* in ('route print ^| findstr "\\<0.0.0.0\\>"') do set "gw=%%*"
-    
-    """)
-    
-    upfile=open('vpnup.bat','w')
-    downfile=open('vpndown.bat','w')
-    
+    upscript_header = """\
+@echo off
+for /F "tokens=3" %%* in ('route print ^| findstr "\\<0.0.0.0\\>"') do set "gw=%%*"
+"""
+
+    upfile = open(os.path.join(output_dir, 'vpnup.bat'),'w')
+    downfile = open(os.path.join(output_dir, 'vpndown.bat'),'w')
+
     upfile.write(upscript_header)
-    upfile.write('\n')
     upfile.write('ipconfig /flushdns\n\n')
-    
+
     downfile.write("@echo off")
     downfile.write('\n')
-    
-    for ip,mask,_ in results:
-        upfile.write('route add %s mask %s %s metric %d\n'%(ip,mask,"%gw%",metric))
-        downfile.write('route delete %s\n'%(ip))
-    
+
+    for ip, mask, _ in results:
+        upfile.write('route add %s mask %s %s metric %d\n' % (ip, mask, "%gw%", metric))
+        downfile.write('route delete %s\n' % ip)
+
     upfile.close()
     downfile.close()
-    
-#    up_vbs_wrapper=open('vpnup.vbs','w')
-#    up_vbs_wrapper.write('Set objShell = CreateObject("Wscript.shell")\ncall objShell.Run("vpnup.bat",0,FALSE)')
-#    up_vbs_wrapper.close()
-#    down_vbs_wrapper=open('vpndown.vbs','w')
-#    down_vbs_wrapper.write('Set objShell = CreateObject("Wscript.shell")\ncall objShell.Run("vpndown.bat",0,FALSE)')
-#    down_vbs_wrapper.close()
-    
-    print "For pptp on windows only, run vpnup.bat before dialing to vpn," \
-          "and run vpndown.bat after disconnected from the vpn."
 
 def generate_android(metric):
     results = fetch_ip_data()
@@ -166,8 +199,8 @@ def generate_android(metric):
     
     """)
     
-    upfile=open('vpnup.sh','w')
-    downfile=open('vpndown.sh','w')
+    upfile=open(os.path.join(output_dir, 'vpnup.sh'),'w')
+    downfile=open(os.path.join(output_dir, 'vpndown.sh'),'w')
     
     upfile.write(upscript_header)
     upfile.write('\n')
@@ -186,61 +219,70 @@ def generate_android(metric):
 
 
 def fetch_ip_data():
-    #fetch data from apnic
-    print "Fetching data from apnic.net, it might take a few minutes, please wait..."
-    url=r'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest'
-    data=urllib2.urlopen(url).read()
-    
-    cnregex=re.compile(r'apnic\|cn\|ipv4\|[0-9\.]+\|[0-9]+\|[0-9]+\|a.*',re.IGNORECASE)
-    cndata=cnregex.findall(data)
-    
-    results=[]
+    url = 'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest'
+    try:
+        data = subprocess.check_output(['wget', url, '-O-'])
+    except (OSError, AttributeError):
+        print >>sys.stderr, "Fetching data from apnic.net, it might take a few minutes, please wait..."
+        data = urllib2.urlopen(url).read()
+
+    cnregex = re.compile(r'^apnic\|cn\|ipv4\|[\d\.]+\|\d+\|\d+\|a\w*$', re.I | re.M)
+    cndata = cnregex.findall(data)
+
+    results = []
+
+    # from local file
+    if os.path.exists('/etc/chnroutes'):
+      f = open('/etc/chnroutes')
+      for line in f:
+        starting_ip, mask, cidr = line.strip().split('|')
+        results.append((starting_ip, mask, cidr))
 
     for item in cndata:
-        unit_items=item.split('|')
-        starting_ip=unit_items[3]
-        num_ip=int(unit_items[4])
-        
-        imask=0xffffffff^(num_ip-1)
-        #convert to string
-        imask=hex(imask)[2:]
-        mask=[0]*4
-        mask[0]=imask[0:2]
-        mask[1]=imask[2:4]
-        mask[2]=imask[4:6]
-        mask[3]=imask[6:8]
-        
-        #convert str to int
-        mask=[ int(i,16 ) for i in mask]
-        mask="%d.%d.%d.%d"%tuple(mask)
-        
-        #mask in *nix format
-        mask2=32-int(math.log(num_ip,2))
-        
-        results.append((starting_ip,mask,mask2))
-         
+        unit_items = item.split('|')
+        starting_ip = unit_items[3]
+        num_ip = int(unit_items[4])
+
+        imask = 0xffffffff ^ (num_ip - 1)
+        imask = hex(imask)[2:]
+
+        mask = [imask[i:i + 2] for i in xrange(0, 8, 2)]
+        mask = '.'.join([str(int(i, 16)) for i in mask])
+
+        cidr = 32 - int(math.log(num_ip, 2))
+
+        results.append((starting_ip, mask, cidr))
+
     return results
 
 
-if __name__=='__main__':
-    parser=argparse.ArgumentParser(description="Generate routing rules for vpn.")
-    parser.add_argument('-p','--platform',
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Generate routing rules for VPN users in China.")
+    parser.add_argument('-p',
                         dest='platform',
                         default='openvpn',
                         nargs='?',
-                        help="Target platforms, it can be openvpn, mac, linux," 
-                        "win, android. openvpn by default.")
-    parser.add_argument('-m','--metric',
+                        choices=['openvpn', 'old', 'mac', 'linux', 'win'],
+                        help="target platform")
+    parser.add_argument('-m',
                         dest='metric',
                         default=5,
                         nargs='?',
                         type=int,
-                        help="Metric setting for the route rules")
-    
+                        help="metric")
+    parser.add_argument('-o',
+                        dest='output',
+                        default=".",
+                        nargs='?',
+                        help='output directory')
+
     args = parser.parse_args()
-    
+    output_dir = args.output
+
     if args.platform.lower() == 'openvpn':
         generate_ovpn(args.metric)
+    elif args.platform.lower() == 'old':
+        generate_old(args.metric)
     elif args.platform.lower() == 'linux':
         generate_linux(args.metric)
     elif args.platform.lower() == 'mac':
@@ -250,5 +292,4 @@ if __name__=='__main__':
     elif args.platform.lower() == 'android':
         generate_android(args.metric)
     else:
-        print>>sys.stderr, "Platform %s is not supported."%args.platform
         exit(1)
