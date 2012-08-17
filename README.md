@@ -16,21 +16,20 @@ chnroutes
 OpenVPN
 --------
 
-如安装有`iproute2`软件包，请尽量使用此方式。自带方式在路由表条目较多时执行极慢。
+### Linux
 
-### iproute2
+1. `$ sudo python chnroutes.py -o /etc/openvpn`
 
-	$ sudo python chnroutes.py -o /etc/openvpn
+2. 编辑 OpenVPN配置文件  
 
-	# 编辑 OpenVPN配置文件  
 
 		script-security 2
 		up vpn-up.sh
 		down vpn-down.sh
 
-	# 重新连接VPN，观察日志测试。
+3. 重新连接VPN，观察日志测试。
 
-### 自带方式
+### Others
 
 1. 执行`python chnroutes.py -p old`, 这将生成`routes.txt`文本文件；
 2. 将该文件内容加在OpenVPN配置文件的尾部；
@@ -78,10 +77,7 @@ PPTP
 * python 2.7.3
 * ipruotes2 (Linux)
 
-Archlinux
-
-	# from aur
-	$ pacaur -S chnroutes-git
+Archlinux: `pacaur -S chnroutes-git` (来自AUR)
 
 基于Linux的第三方系统的路由器
 ------------------------------
