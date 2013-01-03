@@ -155,6 +155,24 @@ OLDGW=`cat /tmp/pptp_oldgw`
     os.chmod(os.path.join(output_dir, 'ip-up'), 00755)
     os.chmod(os.path.join(output_dir, 'ip-down'), 00755)
 
+def generate_routeros(metric):
+    results=fetch_ip_data()
+
+    downscript_header = """\
+:foreach i in=[/ip route rule find action="lookup" and table="chnroutes"] do={
+    /ip route remove $i
+}
+"""
+
+    scriptfile = open(os.path.join(output_dir, 'chnroutes.rsc'),'w')
+    scriptfile.write(downscript_header)
+
+    for ip, _, mask in results:
+        scriptfile.write('/ip route rule add action="lookup" table="chnroutes" dst-address="%s/%s"\n' % (ip, mask))
+
+    scriptfile.close()
+
+
 def generate_win(metric):
     results = fetch_ip_data()
 
@@ -262,7 +280,7 @@ if __name__ == '__main__':
                         dest='platform',
                         default='openvpn',
                         nargs='?',
-                        choices=['openvpn', 'old', 'mac', 'linux', 'win'],
+                        choices=['openvpn', 'old', 'mac', 'linux', 'win', 'routeros'],
                         help="target platform")
     parser.add_argument('-m',
                         dest='metric',
@@ -287,6 +305,8 @@ if __name__ == '__main__':
         generate_linux(args.metric)
     elif args.platform.lower() == 'mac':
         generate_mac(args.metric)
+    elif args.platform.lower() == 'routeros':
+        generate_routeros(args.metric)
     elif args.platform.lower() == 'win':
         generate_win(args.metric)
     elif args.platform.lower() == 'android':
