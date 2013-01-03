@@ -44,6 +44,13 @@ PPTP
 2. 将这两个文件移入`/etc/ppp/`；
 3. 重新连接VPN，观察测试。
 
+### RouterOS
+
+1. 在本地计算机终端或者命令提示符中执行`python chnroutes.py -p routeros`，这将生成`chnroutes.rsc`文件；
+2. 你可以用ftp，或者Web管理页面，或者Winbox将该文件上传至你的RouterOS；
+3. 在RouterOS终端输入`/import chnroutes.rsc`；
+4. 假设你的本地网关是192.168.1.1，在RouterOS终端输入`/ip route add disable=no distance=1 dst-address=0.0.0.0/0 gateway=192.168.1.1 routing-mark=chnroutes`；
+
 ### Linux
 
 1. 执行`python chnroutes.py -p linux`，这将生成`ip-pre-up`和`ip-down`两个文件；
