@@ -235,7 +235,6 @@ def generate_android(metric):
     print "Old school way to call up/down script from openvpn client. " \
           "use the regular openvpn 2.1 method to add routes if it's possible"
 
-
 def fetch_ip_data():
     url = 'http://ftp.apnic.net/apnic/stats/apnic/delegated-apnic-latest'
     try:

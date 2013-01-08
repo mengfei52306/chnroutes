@@ -95,3 +95,9 @@ Archlinux: `pacaur -S chnroutes-git` (来自AUR)
 --------
 
 本项目的脚本都是在使用路由器进行拨号的情况下测试通过的，如果在其它拨号方式下，脚本不能运作，请添加新的Issue。另外，在配合OpenVPN使用的时候，可能会出现因为网络质量不好，OpenVPN非主动断开，这时候`vpn-down.sh`脚本也会被自动调用，但重新连上之后，可能会找不到默认路由而添加失败，这时候你可以通过停止OpenVPN，并手动设置好原来的默认路由再重新进行OpenVPN拨号。
+
+
+资源
+----
+
+* [freedom-routes](https://github.com/GutenYe/freedom-routes): 另一个用Go语言写的chnroutes.
