@@ -82,7 +82,7 @@ ip -batch - <<EOF
 #!/bin/bash
 export PATH="/bin:/sbin:/usr/sbin:/usr/bin"
 
-OLDGW=$(cat /tmp/vpn_oldgw)
+OLDGW=$(cat /tmp/vpn_oldgw | head -n1)
 
 ip -batch - <<EOF
 """
@@ -134,7 +134,7 @@ if [ ! -e /tmp/pptp_oldgw ]; then
         exit 0
 fi
 
-OLDGW=`cat /tmp/pptp_oldgw`
+OLDGW=`cat /tmp/pptp_oldgw | head -n 1`
 """
 
     upfile = open(os.path.join(output_dir, 'ip-up'),'w')
